@@ -131,7 +131,7 @@ IMPORTANT: Generate unique IDs for actions (e.g., "action-1", "action-2"), inclu
         { role: 'system', content: systemMessage },
         { role: 'user', content: userMessage }
       ],
-      max_completion_tokens: 1000, // Increased from 500 since we have 400K context
+      max_completion_tokens: 2500, // Increased to 2500 for 10 items with actions
     });
 
     let responseText = completion.choices[0].message.content || '{"items":[]}';

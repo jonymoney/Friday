@@ -232,8 +232,41 @@ Update user profile with personal information.
 #### `GET /profile`
 Retrieve user profile.
 
+**Headers:** `Authorization: Bearer <token>`
+
+**Response:**
+```json
+{
+  "id": "profile_uuid",
+  "userId": "user_uuid",
+  "data": {
+    "name": "John Doe",
+    "birthday": "1990-01-01",
+    "homeAddress": "123 Main St, Seattle, WA",
+    "workAddress": "456 Office Blvd, Bellevue, WA",
+    "phone": "+1-555-0123",
+    "preferences": {
+      "dietaryRestrictions": ["vegetarian"],
+      "commuteMethod": "car",
+      "timezone": "America/Los_Angeles"
+    }
+  },
+  "createdAt": "2025-10-11T20:00:00Z",
+  "updatedAt": "2025-10-11T20:00:00Z"
+}
+```
+
 #### `DELETE /profile`
 Delete user profile and associated context.
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Response:**
+```json
+{
+  "message": "Profile deleted successfully"
+}
+```
 
 ### Search & Context
 

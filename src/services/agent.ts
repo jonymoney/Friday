@@ -15,11 +15,11 @@ export class AgentService {
     userId: string,
     question: string
   ): Promise<{ answer: string; sources: any[]; toolsUsed?: ToolResult[] }> {
-    // 1. Get relevant context using semantic search (reduced from 5 to 3)
-    const semanticResults = await VectorStore.searchSimilar(userId, question, 3);
+    // 1. Get relevant context using semantic search (increased to 5 with GPT-5's 400K context)
+    const semanticResults = await VectorStore.searchSimilar(userId, question, 5);
 
-    // 2. Get recent context (last 24h) (reduced from 3 to 2)
-    const recentResults = await VectorStore.getRecentContext(userId, 2);
+    // 2. Get recent context (last 24h) (increased to 3 with GPT-5's 400K context)
+    const recentResults = await VectorStore.getRecentContext(userId, 3);
 
     // 3. Combine and deduplicate
     const seenIds = new Set<string>();
@@ -32,11 +32,11 @@ export class AgentService {
       }
     });
 
-    // 4. Format context for prompt (truncate long content to 800 chars per document)
+    // 4. Format context for prompt (moderate truncation with GPT-5's 400K context)
     const contextText = allContext
       .map((ctx, idx) => {
-        const truncatedContent = ctx.content.length > 800
-          ? ctx.content.substring(0, 800) + '...[truncated]'
+        const truncatedContent = ctx.content.length > 1000
+          ? ctx.content.substring(0, 1000) + '...'
           : ctx.content;
         return `[${idx + 1}] Source: ${ctx.source}\n${truncatedContent}\n`;
       })
@@ -88,12 +88,11 @@ Question: ${question}`;
     // Allow up to 3 iterations of function calling
     for (let iteration = 0; iteration < 3; iteration++) {
       const completion = await openai.chat.completions.create({
-        model: 'gpt-4',
+        model: 'gpt-5-chat-latest',
         messages,
         tools,
         tool_choice: 'auto',
-        temperature: 0.7,
-        max_tokens: 800,
+        max_completion_tokens: 1000, // Increased from 500 with GPT-5's 400K context
       });
 
       const message = completion.choices[0].message;
@@ -189,15 +188,14 @@ Question: ${question}
 
 Answer based only on the provided context above.`;
 
-    // Call GPT-4 with streaming
+    // Call GPT-5 with streaming
     const stream = await openai.chat.completions.create({
-      model: 'gpt-4',
+      model: 'gpt-5-chat-latest',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
-      temperature: 0.7,
-      max_tokens: 500,
+      max_completion_tokens: 500,
       stream: true,
     });
 

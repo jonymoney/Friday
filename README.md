@@ -19,14 +19,15 @@ Monday API is an intelligent personal assistant backend that:
 - **Framework**: Express.js
 - **Database**: PostgreSQL (Railway-hosted) with pgvector extension
 - **ORM**: Prisma
-- **AI/ML**: OpenAI API (GPT-4 & text-embedding-3-small)
+- **AI/ML**: OpenAI API (GPT-5 & text-embedding-3-small)
 - **Authentication**: Google OAuth 2.0 + JWT
 - **External APIs**:
   - Google Calendar API
   - Gmail API
-  - Google Routes API (New)
-  - Google Places API (New)
-  - OpenWeatherMap API
+  - Google Routes API (New) - for real-time traffic and directions
+  - Google Places API (New) - for location search
+  - Google Geocoding API - for address to coordinates conversion
+  - OpenWeatherMap API - for weather forecasts
 
 ### System Architecture
 
@@ -83,9 +84,10 @@ Monday API is an intelligent personal assistant backend that:
 3. **Query Processing**
    - User asks a question
    - System generates embedding for query
-   - Performs semantic search against stored context
-   - Agent uses GPT-4 with retrieved context and real-time tools
-   - Returns intelligent response
+   - Performs semantic search against stored context (limited to top 3 results)
+   - Content is truncated to 800 chars per document to optimize token usage
+   - Agent uses GPT-5 with retrieved context and real-time tools
+   - Returns intelligent response with sources and tools used
 
 ## Database Schema
 
@@ -301,27 +303,89 @@ Ask the AI agent a question. The agent uses RAG to retrieve relevant context and
 ### Personalized Feed
 
 #### `GET /feed`
-Get a personalized daily feed with recommendations.
+Get a personalized daily feed with actionable recommendations powered by GPT-5.
+
+**Headers:** `Authorization: Bearer <token>`
 
 **Response:**
 ```json
 {
   "items": [
     {
-      "type": "morning_prep",
-      "title": "🌅 Morning Preparation",
-      "sections": [...]
+      "title": "Rena's BBQ Tomorrow",
+      "summary": "Attend Rena's BBQ in Seattle Chinatown-International District from 12:00 PM to 1:00 PM.",
+      "source": "calendar",
+      "priority": "high",
+      "time": "2025-10-12T12:00:00-07:00",
+      "createdAt": "2025-10-11T21:00:00Z",
+      "actions": [
+        {
+          "id": "action-1",
+          "type": "directions",
+          "label": "Get directions",
+          "description": "Calculate route with current traffic",
+          "params": {
+            "from": "current_location",
+            "to": "Seattle Chinatown-International District, Seattle, WA",
+            "departureTime": "2025-10-12T11:30:00-07:00"
+          }
+        },
+        {
+          "id": "action-2",
+          "type": "weather_check",
+          "label": "Check weather",
+          "description": "Get weather forecast for outdoor BBQ",
+          "params": {
+            "location": "Seattle Chinatown-International District, Seattle, WA",
+            "datetime": "2025-10-12T12:00:00-07:00"
+          }
+        }
+      ]
     },
     {
-      "type": "calendar",
-      "title": "📅 Today's Schedule",
-      "sections": [...]
+      "title": "Healthy Meal Reminder",
+      "summary": "Eat something healthy near Bellevue Square from 4:00 PM to 5:00 PM today.",
+      "source": "calendar",
+      "priority": "medium",
+      "time": "2025-10-11T16:00:00-07:00",
+      "createdAt": "2025-10-11T21:00:00Z",
+      "actions": [
+        {
+          "id": "action-3",
+          "type": "restaurant_search",
+          "label": "Find healthy restaurants",
+          "description": "Search for healthy food options nearby",
+          "params": {
+            "location": "Bellevue Square, 575 Bellevue Square, Bellevue, WA",
+            "cuisine": "healthy",
+            "dietary": ["vegetarian"]
+          }
+        }
+      ]
     }
   ],
-  "count": 5,
-  "generatedAt": "2025-10-11T20:00:00Z"
+  "count": 10,
+  "generatedAt": "2025-10-11T21:00:00Z"
 }
 ```
+
+#### Feed Item Actions
+
+Feed items with **high** or **medium** priority include actionable suggestions that can be triggered:
+
+**Action Types:**
+- `directions`: Get route and traffic info (params: `from`, `to`, `departureTime`)
+- `restaurant_search`: Find nearby restaurants (params: `location`, `cuisine`, `dietary`)
+- `weather_check`: Check weather for event (params: `location`, `datetime`)
+- `prep`: Generate meeting preparation brief (params: `eventTitle`, `attendees`)
+- `reminder`: Set a reminder notification (params: `time`, `message`)
+
+Each action includes:
+- `id`: Unique identifier for the action
+- `type`: Type of action to perform
+- `label`: User-friendly button label
+- `description`: Explanation of what the action does
+- `params`: Action-specific parameters ready to use with the tool APIs
 
 ## Development
 
@@ -329,9 +393,14 @@ Get a personalized daily feed with recommendations.
 
 - Node.js 18+
 - PostgreSQL with pgvector extension
-- Google Cloud Project with OAuth credentials
-- OpenAI API key
-- OpenWeatherMap API key (optional)
+- Google Cloud Project with OAuth credentials and enabled APIs:
+  - Google Calendar API
+  - Gmail API
+  - Routes API
+  - Places API (New)
+  - Geocoding API
+- OpenAI API key (with GPT-5 access)
+- OpenWeatherMap API key
 
 ### Environment Variables
 
@@ -355,10 +424,10 @@ JWT_SECRET=your_jwt_secret_here
 # OpenAI API Key
 OPENAI_API_KEY=sk-...
 
-# Google Maps API Key (for real-time tools)
+# Google Maps API Key (for real-time tools - requires Routes, Places, Geocoding APIs enabled)
 GOOGLE_MAPS_API_KEY=AIza...
 
-# OpenWeatherMap API Key (for weather forecasts)
+# OpenWeatherMap API Key (for weather forecasts - requires activation after creation)
 WEATHER_API_KEY=...
 ```
 
@@ -416,21 +485,33 @@ Prevents duplicate entries using composite unique constraints on `[userId, sourc
 Uses OpenAI's `text-embedding-3-small` (1536 dimensions) to generate embeddings for all content. Enables intelligent similarity-based search across all user data.
 
 ### 3. RAG (Retrieval Augmented Generation)
-Agent retrieves relevant context before answering questions, ensuring responses are grounded in user's actual data rather than hallucinations.
+Agent retrieves relevant context before answering questions, ensuring responses are grounded in user's actual data rather than hallucinations. Uses GPT-5 with:
+- Top 3 semantic search results (by similarity)
+- Last 2 recent context entries (by time)
+- Content truncation to 800 chars per document
+- Token optimization to stay within model limits
 
-### 4. Real-time Tools
-Agent can call external APIs for up-to-date information:
-- Traffic and directions
-- Weather forecasts
-- Place searches
+### 4. Real-time Tools (Function Calling)
+Agent can call external APIs for up-to-date information using GPT-5 function calling:
+- **Directions & Traffic**: Google Routes API with real-time traffic data
+- **Place Search**: Google Places API (New) with geocoding for accurate location-based searches
+- **Weather Forecasts**: OpenWeatherMap API with 5-day forecasts
+- **Current Time**: System time with timezone support
 
-### 5. Personalized Feed
-Generates daily feed with:
-- Morning preparation tips
-- Today's schedule
-- Smart commute planning
-- Weather-aware recommendations
-- Contextual suggestions
+Tools are automatically invoked by GPT-5 when relevant to the user's query (up to 3 iterations of function calls).
+
+### 5. Personalized Feed with Actionable Items
+Generates intelligent daily feed using GPT-5-chat-latest (400K context window):
+- **Prioritized Items**: Up to 10 feed items ranked by urgency (high/medium/low)
+- **Rich Context**: 10 calendar events + 5 other sources with 800-char content
+- **Actionable Suggestions**: High/medium priority items include action buttons:
+  - Get directions with real-time traffic
+  - Find nearby restaurants
+  - Check weather forecasts
+  - Generate meeting prep briefs
+  - Set reminders
+- **Smart System**: Proper system/user message structure for optimal GPT-5 performance
+- **Flexible Actions**: Each action includes ready-to-use parameters for tool APIs
 
 ## Security Considerations
 
@@ -449,18 +530,41 @@ Generates daily feed with:
 7. **Add CORS restrictions**
 8. **Implement proper logging** (exclude sensitive data)
 
+## Recent Improvements
+
+### GPT-5-chat-latest Migration (October 2025)
+- **Correct Model**: Changed from `gpt-5` → `gpt-5-chat-latest` (400K context window)
+- **Message Structure**: Implemented system/user message separation for better results
+- **Increased Limits**: Leveraging 400K context - calendar events 3→10, other context 2→5, truncation 200→800 chars
+- **JSON Parsing**: Added markdown code fence stripping for reliable parsing
+- **Actionable Feed**: High/medium priority items now include action buttons with tool parameters
+
+### Google APIs Migration
+- **Routes API (New)**: Migrated from legacy Directions API for better traffic data
+- **Places API (New)**: Migrated from legacy Places API with proper geocoding support
+- **Geocoding API**: Added for accurate address-to-coordinates conversion in place searches
+
+### Deduplication System
+- Added `sourceId` field and unique constraints to prevent duplicate entries
+- Calendar events use Google event IDs
+- Gmail messages use message IDs
+- Profile uses fixed 'user_profile' ID
+- All syncs use `upsert` operations instead of `create`
+
 ## Future Enhancements
 
-- [ ] Enable pgvector extension for native vector storage
-- [ ] Add more data sources (Slack, Email, etc.)
+- [ ] Enable native pgvector extension for optimized vector operations
+- [ ] Add more data sources (Slack, Notion, Todoist)
 - [ ] Implement batch processing for large syncs
-- [ ] Add webhook support for real-time updates
-- [ ] Implement caching layer (Redis)
-- [ ] Add user preferences for sync frequency
-- [ ] Support multiple calendar/email accounts
-- [ ] Add conversation history for multi-turn dialogues
-- [ ] Implement vector index optimization
+- [ ] Add webhook support for real-time calendar/email updates
+- [ ] Implement caching layer (Redis) for feed and query results
+- [ ] Add user preferences for sync frequency and data retention
+- [ ] Support multiple calendar/email accounts per user
+- [ ] Add conversation history for multi-turn dialogues with context
+- [ ] Implement vector index optimization (IVF, HNSW)
 - [ ] Add analytics and insights dashboard
+- [ ] Implement streaming responses for query endpoint
+- [ ] Add support for file attachments (PDFs, docs) from Gmail
 
 ## License
 

@@ -6,6 +6,14 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+interface FeedAction {
+  id: string;
+  type: 'directions' | 'restaurant_search' | 'reminder' | 'prep' | 'weather_check';
+  label: string;
+  description: string;
+  params: Record<string, any>;
+}
+
 interface FeedItem {
   title: string;
   summary: string;
@@ -13,6 +21,7 @@ interface FeedItem {
   priority: 'high' | 'medium' | 'low';
   time?: string;
   createdAt: Date;
+  actions?: FeedAction[]; // Optional array of actionable items
 }
 
 export class FeedService {
@@ -22,7 +31,7 @@ export class FeedService {
   static async generateFeed(userId: string): Promise<FeedItem[]> {
     const now = new Date();
 
-    // 1. Get recent calendar events (reduced from 10 to 5)
+    // 1. Get recent calendar events (increased to 10 with GPT-5's 400K context)
     const todayEvents = await prisma.userContext.findMany({
       where: {
         userId,
@@ -31,10 +40,10 @@ export class FeedService {
       orderBy: {
         createdAt: 'desc',
       },
-      take: 5,
+      take: 10,
     });
 
-    // 2. Get recent context from other sources (reduced from 10 to 3)
+    // 2. Get recent context from other sources (increased to 5 with GPT-5's 400K context)
     const recentContext = await prisma.userContext.findMany({
       where: {
         userId,
@@ -45,7 +54,7 @@ export class FeedService {
       orderBy: {
         createdAt: 'desc',
       },
-      take: 3,
+      take: 5,
     });
 
     // 3. Combine all context
@@ -55,63 +64,87 @@ export class FeedService {
       return [];
     }
 
-    // 4. Use GPT-4 to analyze, rank, and summarize (with truncated content)
+    // 4. Format context with more detail (GPT-5 has 400K context window)
     const contextText = allContext
       .map((ctx, idx) => {
-        // Truncate content to 600 chars to prevent token overflow
-        const truncatedContent = ctx.content.length > 600
-          ? ctx.content.substring(0, 600) + '...[truncated]'
+        // Moderate truncation at 800 chars for balance of detail and efficiency
+        const truncatedContent = ctx.content.length > 800
+          ? ctx.content.substring(0, 800) + '...'
           : ctx.content;
-        return `[${idx + 1}] ${truncatedContent}`;
+        return `[${idx + 1}] Source: ${ctx.source}\n${truncatedContent}`;
       })
       .join('\n\n');
 
     const currentTime = now.toISOString();
-    const prompt = `You are a personal assistant creating a prioritized daily feed.
 
-Current time: ${currentTime}
+    // Use proper system/user message structure for better results
+    const systemMessage = `You are a personal assistant that creates prioritized daily feeds from user's calendar and context data. Current time: ${currentTime}
 
-User's calendar events and recent context:
-${contextText}
+Your task: Analyze the user's context and create up to 10 actionable feed items. For high and medium priority items, suggest relevant actions the user can take.
 
-Task: Create a feed of the 5-10 most important items for the user today. For each item:
-1. Extract a clear, concise title (max 50 chars)
-2. Write a brief summary highlighting key details (who, what, when, where)
-3. Assign priority: "high" (urgent/important), "medium" (relevant), or "low" (nice to know)
-4. Extract time if it's an event with a specific time
+For each item, provide:
+- title: Clear, concise (max 50 chars)
+- summary: Brief details (who, what, when, where)
+- priority: "high" (urgent/important), "medium" (relevant), or "low" (nice to know)
+- time: Specific time if applicable (ISO 8601 format with timezone)
+- actions: Array of actionable suggestions (ONLY for high/medium priority items)
 
-Focus on:
-- Upcoming meetings/events (within next few hours are highest priority)
-- Important recent items that need attention
-- Time-sensitive information
+Action Types:
+1. "directions": Get route with traffic (params: from, to, departureTime)
+2. "restaurant_search": Find nearby restaurants (params: location, cuisine, dietary)
+3. "weather_check": Check weather for event (params: location, datetime)
+4. "prep": Meeting preparation brief (params: eventTitle, attendees)
+5. "reminder": Set reminder (params: time, message)
 
-Return ONLY valid JSON in this exact format:
+Return ONLY valid JSON in this format:
 {
   "items": [
     {
-      "title": "Budget meeting",
-      "summary": "Team budget review with Sarah at 2pm, bring Q1 reports",
+      "title": "Meeting title",
+      "summary": "Brief summary with key details",
       "priority": "high",
-      "time": "14:00"
+      "time": "2025-10-11T14:00:00-07:00",
+      "actions": [
+        {
+          "id": "unique-id",
+          "type": "directions",
+          "label": "Get directions",
+          "description": "Calculate route with current traffic",
+          "params": {
+            "from": "current_location",
+            "to": "Meeting location address",
+            "departureTime": "2025-10-11T13:30:00-07:00"
+          }
+        }
+      ]
     }
   ]
-}`;
+}
+
+IMPORTANT: Generate unique IDs for actions (e.g., "action-1", "action-2"), include relevant context in params, and only add actions that would genuinely help the user.`;
+
+    const userMessage = `Here is the user's context:\n\n${contextText}\n\nGenerate the feed items now.`;
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.3,
-      max_tokens: 1000,
+      model: 'gpt-5-chat-latest',
+      messages: [
+        { role: 'system', content: systemMessage },
+        { role: 'user', content: userMessage }
+      ],
+      max_completion_tokens: 1000, // Increased from 500 since we have 400K context
     });
 
-    const responseText = completion.choices[0].message.content || '{"items":[]}';
+    let responseText = completion.choices[0].message.content || '{"items":[]}';
+
+    // Strip markdown code fences if present (GPT-5 sometimes adds them)
+    responseText = responseText.replace(/^```json\s*/i, '').replace(/\s*```\s*$/, '').trim();
 
     // 5. Parse and return feed items
     try {
       const parsed = JSON.parse(responseText);
       const items = parsed.items || [];
 
-      // Add source and createdAt to each item
+      // Add source and createdAt to each item, preserve actions if present
       return items.map((item: any) => ({
         title: item.title || 'Untitled',
         summary: item.summary || '',
@@ -119,9 +152,11 @@ Return ONLY valid JSON in this exact format:
         priority: item.priority || 'medium',
         time: item.time,
         createdAt: now,
+        ...(item.actions && item.actions.length > 0 && { actions: item.actions }),
       }));
     } catch (error) {
-      console.error('Error parsing GPT-4 response:', error);
+      console.error('Error parsing GPT-5 response:', error);
+      console.error('Raw response:', responseText);
       return [];
     }
   }

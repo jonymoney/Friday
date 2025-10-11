@@ -22,41 +22,30 @@ export class FeedService {
   static async generateFeed(userId: string): Promise<FeedItem[]> {
     const now = new Date();
 
-    // 1. Get today's events (next 24 hours)
-    const tomorrow = new Date(now);
-    tomorrow.setHours(tomorrow.getHours() + 24);
-
+    // 1. Get recent calendar events (reduced from 10 to 5)
     const todayEvents = await prisma.userContext.findMany({
       where: {
         userId,
         source: 'google_calendar',
-        createdAt: {
-          gte: now,
-          lte: tomorrow,
-        },
       },
       orderBy: {
-        createdAt: 'asc',
+        createdAt: 'desc',
       },
-      take: 10,
+      take: 5,
     });
 
-    // 2. Get recent context (last 24 hours)
-    const yesterday = new Date(now);
-    yesterday.setHours(yesterday.getHours() - 24);
-
+    // 2. Get recent context from other sources (reduced from 10 to 3)
     const recentContext = await prisma.userContext.findMany({
       where: {
         userId,
-        createdAt: {
-          gte: yesterday,
-          lte: now,
+        source: {
+          not: 'google_calendar',
         },
       },
       orderBy: {
         createdAt: 'desc',
       },
-      take: 10,
+      take: 3,
     });
 
     // 3. Combine all context
@@ -66,10 +55,14 @@ export class FeedService {
       return [];
     }
 
-    // 4. Use GPT-4 to analyze, rank, and summarize
+    // 4. Use GPT-4 to analyze, rank, and summarize (with truncated content)
     const contextText = allContext
       .map((ctx, idx) => {
-        return `[${idx + 1}] ${ctx.content}`;
+        // Truncate content to 600 chars to prevent token overflow
+        const truncatedContent = ctx.content.length > 600
+          ? ctx.content.substring(0, 600) + '...[truncated]'
+          : ctx.content;
+        return `[${idx + 1}] ${truncatedContent}`;
       })
       .join('\n\n');
 

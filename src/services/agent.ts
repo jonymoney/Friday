@@ -15,11 +15,11 @@ export class AgentService {
     userId: string,
     question: string
   ): Promise<{ answer: string; sources: any[]; toolsUsed?: ToolResult[] }> {
-    // 1. Get relevant context using semantic search
-    const semanticResults = await VectorStore.searchSimilar(userId, question, 5);
+    // 1. Get relevant context using semantic search (reduced from 5 to 3)
+    const semanticResults = await VectorStore.searchSimilar(userId, question, 3);
 
-    // 2. Get recent context (last 24h)
-    const recentResults = await VectorStore.getRecentContext(userId, 3);
+    // 2. Get recent context (last 24h) (reduced from 3 to 2)
+    const recentResults = await VectorStore.getRecentContext(userId, 2);
 
     // 3. Combine and deduplicate
     const seenIds = new Set<string>();
@@ -32,10 +32,13 @@ export class AgentService {
       }
     });
 
-    // 4. Format context for prompt
+    // 4. Format context for prompt (truncate long content to 800 chars per document)
     const contextText = allContext
       .map((ctx, idx) => {
-        return `[${idx + 1}] Source: ${ctx.source}\n${ctx.content}\n`;
+        const truncatedContent = ctx.content.length > 800
+          ? ctx.content.substring(0, 800) + '...[truncated]'
+          : ctx.content;
+        return `[${idx + 1}] Source: ${ctx.source}\n${truncatedContent}\n`;
       })
       .join('\n');
 

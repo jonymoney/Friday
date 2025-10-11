@@ -268,14 +268,34 @@ export class ToolService {
     }
 
     try {
-      // Places API (New) uses POST with text search
+      // First, geocode the location to get lat/lng using Geocoding API
+      const geocodeResponse = await axios.get(
+        'https://maps.googleapis.com/maps/api/geocode/json',
+        {
+          params: {
+            address: location,
+            key: this.googleMapsKey,
+          },
+        }
+      );
+
+      if (!geocodeResponse.data.results || geocodeResponse.data.results.length === 0) {
+        return {
+          error: 'Location not found',
+          message: `Could not geocode location: ${location}`,
+        };
+      }
+
+      const { lat, lng } = geocodeResponse.data.results[0].geometry.location;
+
+      // Now use Places API (New) with text search
       const requestBody = {
         textQuery: query,
         locationBias: {
           circle: {
             center: {
-              // Try to geocode the location first
-              address: location,
+              latitude: lat,
+              longitude: lng,
             },
             radius: radius,
           },

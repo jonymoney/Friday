@@ -140,19 +140,15 @@ Get Google OAuth authorization URL.
 ```
 
 #### `GET /auth/callback?code=...`
-Handle OAuth callback and exchange code for tokens.
+Handle OAuth callback and exchange code for tokens. After successful authentication, redirects to frontend with token.
 
-**Response:**
-```json
-{
-  "message": "Authentication successful",
-  "token": "jwt_token_here",
-  "user": {
-    "id": "user_uuid",
-    "email": "user@example.com"
-  }
-}
-```
+**Redirect Success:**
+Redirects to: `${FRONTEND_URL}/auth/callback?token=jwt_token&userId=user_uuid&email=user@example.com`
+
+**Redirect Error:**
+Redirects to: `${FRONTEND_URL}/auth/callback?error=error_message`
+
+**Note:** Frontend should extract token from URL params and store it for subsequent API calls.
 
 #### `GET /auth/status`
 Check current authentication status.
@@ -450,6 +446,9 @@ DATABASE_URL="postgresql://user:password@host:port/database"
 GOOGLE_CLIENT_ID=your_client_id
 GOOGLE_CLIENT_SECRET=your_client_secret
 GOOGLE_REDIRECT_URI=http://localhost:3000/auth/callback
+
+# Frontend URL (for OAuth redirects after authentication)
+FRONTEND_URL=http://localhost:5173
 
 # JWT Secret (generate a secure random string)
 JWT_SECRET=your_jwt_secret_here

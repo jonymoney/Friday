@@ -341,6 +341,11 @@ export class IngestionService {
     let body = '';
     if (message.payload?.body?.data) {
       body = Buffer.from(message.payload.body.data, 'base64').toString('utf-8');
+      // Check if body is HTML and convert links before stripping
+      if (body.includes('<') && body.includes('>')) {
+        body = this.convertHtmlLinksToMarkdown(body);
+        body = body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+      }
     } else if (message.payload?.parts) {
       // Multi-part message, try to find text/plain or text/html
       for (const part of message.payload.parts) {

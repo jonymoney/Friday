@@ -160,7 +160,7 @@ export class IngestionService {
   /**
    * Sync Gmail emails for a user and generate embeddings
    */
-  static async syncEmails(userId: string): Promise<{ processed: number; errors: number }> {
+  static async syncEmails(userId: string): Promise<{ processed: number; skipped: number; errors: number }> {
     try {
       // Get authenticated Google client for user
       const authClient = await AuthService.getAuthClientForUser(userId);
@@ -182,12 +182,32 @@ export class IngestionService {
       });
 
       const messages = response.data.messages || [];
+
+      // Check which emails already exist in the database
+      const existingEmails = await prisma.userContext.findMany({
+        where: {
+          userId,
+          source: 'gmail',
+        },
+        select: { sourceId: true },
+      });
+
+      const existingIds = new Set(existingEmails.map((e) => e.sourceId));
+      console.log(`Found ${existingIds.size} existing emails in database`);
+
       let processed = 0;
+      let skipped = 0;
       let errors = 0;
 
-      // Process each message
+      // Process each message (only NEW ones)
       for (const message of messages) {
         if (!message.id) continue;
+
+        // Skip if already processed
+        if (existingIds.has(message.id)) {
+          skipped++;
+          continue;
+        }
 
         try {
           await this.processEmailMessage(userId, gmail, message.id);
@@ -198,7 +218,8 @@ export class IngestionService {
         }
       }
 
-      return { processed, errors };
+      console.log(`Email sync completed: ${processed} processed, ${skipped} skipped, ${errors} errors`);
+      return { processed, skipped, errors };
     } catch (error) {
       console.error('Gmail sync error:', error);
       throw error;
@@ -227,6 +248,18 @@ export class IngestionService {
 
     // Extract email metadata and content
     const emailData = this.extractEmailData(message.data);
+
+    // Debug logging for TLDR emails
+    const subject = emailData.subject.toLowerCase();
+    if (subject.includes('tldr')) {
+      console.log('\n=== DEBUG: TLDR Email ===');
+      console.log('Subject:', emailData.subject);
+      console.log('From:', emailData.from);
+      console.log('Body length:', emailData.body.length);
+      console.log('Body preview:', emailData.body.substring(0, 500));
+      console.log('========================\n');
+    }
+
     const content = this.formatEmailContent(emailData);
 
     // Generate embedding using OpenAI
@@ -260,6 +293,23 @@ export class IngestionService {
         content,
         embedding: embedding,
       },
+    });
+  }
+
+  /**
+   * Convert HTML links to markdown format before stripping HTML tags
+   * Converts <a href="URL">TEXT</a> to [TEXT](URL)
+   */
+  private static convertHtmlLinksToMarkdown(html: string): string {
+    // Match <a> tags with href attribute
+    // Pattern: <a href="URL">TEXT</a> or <a href='URL'>TEXT</a>
+    const linkPattern = /<a\s+[^>]*href=["']([^"']+)["'][^>]*>(.*?)<\/a>/gi;
+
+    return html.replace(linkPattern, (match, url, text) => {
+      // Strip any HTML tags from the link text
+      const cleanText = text.replace(/<[^>]*>/g, '').trim();
+      // Return markdown format
+      return `[${cleanText}](${url})`;
     });
   }
 
@@ -304,7 +354,9 @@ export class IngestionService {
         for (const part of message.payload.parts) {
           if (part.mimeType === 'text/html' && part.body?.data) {
             body = Buffer.from(part.body.data, 'base64').toString('utf-8');
-            // Strip HTML tags for embedding (basic cleanup)
+            // Convert HTML links to markdown format before stripping tags
+            body = this.convertHtmlLinksToMarkdown(body);
+            // Strip remaining HTML tags
             body = body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
             break;
           }

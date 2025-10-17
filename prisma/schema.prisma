@@ -20,6 +20,7 @@ model User {
   createdAt    DateTime      @default(now())
   contexts     UserContext[]
   profile      UserProfile?
+  feedItems    FeedItem[]
 }
 
 model UserProfile {
@@ -45,4 +46,162 @@ model UserContext {
   @@unique([userId, source, sourceId], name: "unique_source_item")
   @@index([userId])
   @@index([source, sourceId])
+}
+
+// Enums
+enum FeedItemType {
+  CALENDAR_EVENT
+  EMAIL
+  TASK
+  REMINDER
+  NOTIFICATION
+  ARTICLE
+  SUGGESTION
+  ALERT
+  ACHIEVEMENT
+  CUSTOM
+}
+
+enum FeedItemPriority {
+  URGENT
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum FeedItemStatus {
+  NEW
+  VIEWED
+  ACTED
+  DISMISSED
+  SNOOZED
+  COMPLETED
+  EXPIRED
+}
+
+enum DataSourceType {
+  GMAIL
+  CALENDAR
+  NOTION
+  DRIVE
+  CUSTOM
+}
+
+enum ActionType {
+  NAVIGATE
+  API_CALL
+  MODAL
+  INLINE
+  AI_ACTION
+  DISMISS
+  SNOOZE
+  COMPLETE
+  SHARE
+  CUSTOM
+}
+
+enum ActionStyle {
+  PRIMARY
+  SECONDARY
+  DANGER
+  SUCCESS
+}
+
+// Feed Item Model
+model FeedItem {
+  id        String           @id @default(uuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      FeedItemType
+  priority  FeedItemPriority
+  timestamp DateTime
+  expiresAt DateTime?
+
+  // Core content
+  title       String
+  subtitle    String?
+  description String?
+
+  // Visual elements
+  icon     String?
+  color    String?
+  imageUrl String?
+
+  // Source tracking (stored as JSON for flexibility)
+  source   Json // DataSource object
+  sourceId String
+
+  // Metadata
+  metadataSchema String? // Type hint for metadata structure
+  metadata       Json    @default("{}")
+
+  // Context & relationships (stored as JSON)
+  tags         String[] // Array of tags
+  relatedItems String[] // Array of FeedItem IDs
+  context      Json?    // ContextInfo object
+
+  // User interaction
+  status       FeedItemStatus @default(NEW)
+  snoozeUntil  DateTime?
+
+  // Relations
+  actions             Action[]
+  interactionHistory  Interaction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([userId, timestamp])
+  @@index([userId, priority])
+  @@index([expiresAt])
+}
+
+// Action Model
+model Action {
+  id         String      @id @default(uuid())
+  feedItemId String
+  feedItem   FeedItem    @relation(fields: [feedItemId], references: [id], onDelete: Cascade)
+
+  label String
+  type  ActionType
+  style ActionStyle? @default(SECONDARY)
+  icon  String?
+
+  // Action configuration (stored as JSON for flexibility)
+  config Json // ActionConfig object
+
+  // Conditions & feedback
+  enabled               Boolean @default(true)
+  requiresConfirmation  Boolean @default(false)
+  confirmationMessage   String?
+
+  // Async action support
+  isAsync        Boolean @default(false)
+  loadingText    String?
+  successMessage String?
+  errorMessage   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([feedItemId])
+}
+
+// Interaction History Model
+model Interaction {
+  id         String   @id @default(uuid())
+  feedItemId String
+  feedItem   FeedItem @relation(fields: [feedItemId], references: [id], onDelete: Cascade)
+
+  timestamp  DateTime @default(now())
+  actionId   String
+  actionType String
+  result     String?  // 'success', 'failure', 'cancelled'
+  durationMs Int?
+  errorMessage String?
+  metadata   Json?    @default("{}")
+
+  @@index([feedItemId])
+  @@index([timestamp])
 }

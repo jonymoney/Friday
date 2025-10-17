@@ -129,7 +129,7 @@ Updates trigger `upsert` operations that update existing records rather than cre
 
 ### Authentication
 
-#### `GET /auth/google`
+#### `GET /api/auth/google`
 Get Google OAuth authorization URL.
 
 **Response:**
@@ -139,7 +139,7 @@ Get Google OAuth authorization URL.
 }
 ```
 
-#### `GET /auth/callback?code=...`
+#### `GET /api/auth/callback?code=...`
 Handle OAuth callback and exchange code for tokens. After successful authentication, redirects to frontend with token.
 
 **Redirect Success:**
@@ -150,7 +150,7 @@ Redirects to: `${FRONTEND_URL}/auth/callback?error=error_message`
 
 **Note:** Frontend should extract token from URL params and store it for subsequent API calls.
 
-#### `GET /auth/status`
+#### `GET /api/auth/status`
 Check current authentication status.
 
 **Headers:** `Authorization: Bearer <token>`
@@ -166,7 +166,7 @@ Check current authentication status.
 
 ### Data Ingestion
 
-#### `POST /sync/calendar`
+#### `POST /api/sync/calendar`
 Sync Google Calendar events from the next 7 days.
 
 **Headers:** `Authorization: Bearer <token>`
@@ -180,7 +180,7 @@ Sync Google Calendar events from the next 7 days.
 }
 ```
 
-#### `POST /sync/emails`
+#### `POST /api/sync/emails`
 Sync Gmail messages from the last 7 days.
 
 **Headers:** `Authorization: Bearer <token>`
@@ -196,7 +196,7 @@ Sync Gmail messages from the last 7 days.
 
 ### Profile Management
 
-#### `PUT /profile`
+#### `PUT /api/profile`
 Update user profile with personal information.
 
 **Headers:** `Authorization: Bearer <token>`
@@ -225,7 +225,7 @@ Update user profile with personal information.
 }
 ```
 
-#### `GET /profile`
+#### `GET /api/profile`
 Retrieve user profile.
 
 **Headers:** `Authorization: Bearer <token>`
@@ -233,8 +233,6 @@ Retrieve user profile.
 **Response:**
 ```json
 {
-  "id": "profile_uuid",
-  "userId": "user_uuid",
   "data": {
     "name": "John Doe",
     "birthday": "1990-01-01",
@@ -246,13 +244,11 @@ Retrieve user profile.
       "commuteMethod": "car",
       "timezone": "America/Los_Angeles"
     }
-  },
-  "createdAt": "2025-10-11T20:00:00Z",
-  "updatedAt": "2025-10-11T20:00:00Z"
+  }
 }
 ```
 
-#### `DELETE /profile`
+#### `DELETE /api/profile`
 Delete user profile and associated context.
 
 **Headers:** `Authorization: Bearer <token>`
@@ -266,7 +262,7 @@ Delete user profile and associated context.
 
 ### Search & Context
 
-#### `POST /search`
+#### `POST /api/search`
 Semantic search across user context.
 
 **Request Body:**
@@ -293,15 +289,15 @@ Semantic search across user context.
 }
 ```
 
-#### `GET /search/recent?limit=10`
+#### `GET /api/search/recent?limit=10`
 Get recent context entries.
 
-#### `GET /context`
+#### `GET /api/context`
 Get all user context (for debugging).
 
 ### AI Agent
 
-#### `POST /query`
+#### `POST /api/query`
 Ask the AI agent a question. The agent uses RAG to retrieve relevant context and can call real-time tools.
 
 **Request Body:**
@@ -331,7 +327,7 @@ Ask the AI agent a question. The agent uses RAG to retrieve relevant context and
 
 ### Personalized Feed
 
-#### `GET /feed`
+#### `GET /api/feed`
 Get a personalized daily feed with actionable recommendations powered by GPT-5.
 
 **Headers:** `Authorization: Bearer <token>`
@@ -445,7 +441,7 @@ DATABASE_URL="postgresql://user:password@host:port/database"
 # Google OAuth
 GOOGLE_CLIENT_ID=your_client_id
 GOOGLE_CLIENT_SECRET=your_client_secret
-GOOGLE_REDIRECT_URI=http://localhost:3000/auth/callback
+GOOGLE_REDIRECT_URI=http://localhost:3000/api/auth/callback
 
 # Frontend URL (for OAuth redirects after authentication)
 FRONTEND_URL=http://localhost:5173

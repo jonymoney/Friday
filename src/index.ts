@@ -18,8 +18,11 @@ const prisma = new PrismaClient();
 // Middleware
 app.use(express.json());
 
+// Create API router
+const apiRouter = express.Router();
+
 // Health check endpoint
-app.get('/health', async (req: Request, res: Response) => {
+apiRouter.get('/health', async (req: Request, res: Response) => {
   try {
     // Test database connection using Prisma
     await prisma.$queryRaw`SELECT 1`;
@@ -31,7 +34,7 @@ app.get('/health', async (req: Request, res: Response) => {
 });
 
 // Auth endpoints
-app.get('/auth/google', (req: Request, res: Response) => {
+apiRouter.get('/auth/google', (req: Request, res: Response) => {
   try {
     const authUrl = AuthService.getAuthUrl();
     res.json({ authUrl });
@@ -41,7 +44,7 @@ app.get('/auth/google', (req: Request, res: Response) => {
   }
 });
 
-app.get('/auth/callback', async (req: Request, res: Response) => {
+apiRouter.get('/auth/callback', async (req: Request, res: Response) => {
   try {
     const code = req.query.code as string;
     if (!code) {
@@ -67,7 +70,7 @@ app.get('/auth/callback', async (req: Request, res: Response) => {
   }
 });
 
-app.get('/auth/status', requireAuth, async (req: Request, res: Response) => {
+apiRouter.get('/auth/status', requireAuth, async (req: Request, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated' });
@@ -86,7 +89,7 @@ app.get('/auth/status', requireAuth, async (req: Request, res: Response) => {
 });
 
 // Protected sync endpoints
-app.post('/sync/calendar', requireAuth, async (req: Request, res: Response) => {
+apiRouter.post('/sync/calendar', requireAuth, async (req: Request, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated' });
@@ -103,7 +106,7 @@ app.post('/sync/calendar', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-app.post('/sync/emails', requireAuth, async (req: Request, res: Response) => {
+apiRouter.post('/sync/emails', requireAuth, async (req: Request, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated' });
@@ -112,7 +115,9 @@ app.post('/sync/emails', requireAuth, async (req: Request, res: Response) => {
     const result = await IngestionService.syncEmails(req.user.userId);
     res.json({
       message: 'Gmail sync completed',
-      ...result,
+      processed: result.processed,
+      skipped: result.skipped,
+      errors: result.errors,
     });
   } catch (error) {
     console.error('Gmail sync error:', error);
@@ -121,7 +126,7 @@ app.post('/sync/emails', requireAuth, async (req: Request, res: Response) => {
 });
 
 // Get user context (for testing)
-app.get('/context', requireAuth, async (req: Request, res: Response) => {
+apiRouter.get('/context', requireAuth, async (req: Request, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated' });
@@ -136,7 +141,7 @@ app.get('/context', requireAuth, async (req: Request, res: Response) => {
 });
 
 // Search endpoints
-app.post('/search', requireAuth, async (req: Request, res: Response) => {
+apiRouter.post('/search', requireAuth, async (req: Request, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated' });
@@ -161,7 +166,7 @@ app.post('/search', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-app.get('/search/recent', requireAuth, async (req: Request, res: Response) => {
+apiRouter.get('/search/recent', requireAuth, async (req: Request, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated' });
@@ -178,7 +183,7 @@ app.get('/search/recent', requireAuth, async (req: Request, res: Response) => {
 });
 
 // AI query endpoint
-app.post('/query', requireAuth, async (req: Request, res: Response) => {
+apiRouter.post('/query', requireAuth, async (req: Request, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated' });
@@ -204,28 +209,124 @@ app.post('/query', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// Personalized feed endpoint
-app.get('/feed', requireAuth, async (req: Request, res: Response) => {
+// Feed endpoints
+
+// Generate new feed items (SLOW - processes unprocessed context)
+apiRouter.post('/feed/generate', requireAuth, async (req: Request, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated' });
     }
 
-    const feed = await FeedService.getFeed(req.user.userId);
+    const result = await FeedService.generateNewFeedItems(req.user.userId);
 
     res.json({
-      items: feed,
-      count: feed.length,
-      generatedAt: new Date().toISOString(),
+      message: 'Feed generation completed',
+      generated: result.generated,
+      skipped: result.skipped,
+      errors: result.errors,
+      total: result.generated + result.skipped,
     });
   } catch (error) {
-    console.error('Feed error:', error);
-    res.status(500).json({ error: 'Failed to generate feed' });
+    console.error('Feed generation error:', error);
+    res.status(500).json({ error: 'Failed to generate feed items' });
+  }
+});
+
+// Get feed items (FAST - returns stored items)
+apiRouter.get('/feed', requireAuth, async (req: Request, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
+    const offset = req.query.offset ? parseInt(req.query.offset as string) : 0;
+    const includeExpired = req.query.includeExpired === 'true';
+
+    const feedItems = await FeedService.getFeedItems(req.user.userId, {
+      limit,
+      offset,
+      includeExpired,
+    });
+
+    res.json({
+      items: feedItems,
+      count: feedItems.length,
+      limit,
+      offset,
+    });
+  } catch (error) {
+    console.error('Feed retrieval error:', error);
+    res.status(500).json({ error: 'Failed to retrieve feed items' });
+  }
+});
+
+// Update feed item status
+apiRouter.patch('/feed/:feedItemId/status', requireAuth, async (req: Request, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    const { feedItemId } = req.params;
+    const { status, snoozeUntil } = req.body;
+
+    if (!status) {
+      return res.status(400).json({ error: 'Status is required' });
+    }
+
+    const updatedItem = await FeedService.updateFeedItemStatus(
+      feedItemId,
+      status,
+      snoozeUntil ? new Date(snoozeUntil) : undefined
+    );
+
+    res.json({
+      message: 'Feed item status updated',
+      item: updatedItem,
+    });
+  } catch (error) {
+    console.error('Feed item update error:', error);
+    res.status(500).json({ error: 'Failed to update feed item status' });
+  }
+});
+
+// Record interaction with feed item
+apiRouter.post('/feed/:feedItemId/interaction', requireAuth, async (req: Request, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    const { feedItemId } = req.params;
+    const { actionId, actionType, result, durationMs, errorMessage } = req.body;
+
+    if (!actionId || !actionType) {
+      return res.status(400).json({ error: 'actionId and actionType are required' });
+    }
+
+    const interaction = await FeedService.recordInteraction(
+      feedItemId,
+      actionId,
+      actionType,
+      result,
+      durationMs,
+      errorMessage
+    );
+
+    res.json({
+      message: 'Interaction recorded',
+      interaction,
+    });
+  } catch (error) {
+    console.error('Interaction recording error:', error);
+    res.status(500).json({ error: 'Failed to record interaction' });
   }
 });
 
 // Profile endpoints
-app.put('/profile', requireAuth, async (req: Request, res: Response) => {
+apiRouter.put('/profile', requireAuth, async (req: Request, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated' });
@@ -249,7 +350,7 @@ app.put('/profile', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-app.get('/profile', requireAuth, async (req: Request, res: Response) => {
+apiRouter.get('/profile', requireAuth, async (req: Request, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated' });
@@ -261,14 +362,14 @@ app.get('/profile', requireAuth, async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Profile not found' });
     }
 
-    res.json({ profile });
+    res.json({ data: profile });
   } catch (error) {
     console.error('Profile get error:', error);
     res.status(500).json({ error: 'Failed to get profile' });
   }
 });
 
-app.delete('/profile', requireAuth, async (req: Request, res: Response) => {
+apiRouter.delete('/profile', requireAuth, async (req: Request, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated' });
@@ -282,6 +383,9 @@ app.delete('/profile', requireAuth, async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to delete profile' });
   }
 });
+
+// Mount API router under /api prefix
+app.use('/api', apiRouter);
 
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
